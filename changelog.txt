@@ -1,0 +1,92 @@
+# Changelog – Seamless Loop Player
+
+## 2026-04-08 v3 – Universal USB Support + Standby Fix
+
+### Änderungen
+
+#### 1. USB-Erkennung: Alle Dateisysteme unterstützt
+- **Problem:** Nur FAT32/exFAT wurde akzeptiert, NTFS/ext4/etc. ignoriert
+- **Fix:** FS-Filter entfernt — jeder USB-Stick mit erkanntem `fstype` wird akzeptiert
+
+#### 2. Mount vereinfacht
+- **Problem:** `ro,noatime` nicht von allen FS unterstützt (z.B. NTFS)
+- **Fix:** `mount -o ro` statt `mount -o ro,noatime`
+
+#### 3. Sudoers angepasst
+- **Fix:** `ro\,noatime` → `ro` in sudoers-Regel
+
+#### 4. Dependencies erweitert
+- **Fix:** `ntfs-3g exfatprogs` zu apt-get install hinzugefügt
+
+#### 5. Schwarzer Standby beim Start
+- **Problem:** Altes `background.png` vom vorherigen Video wurde beim Neustart angezeigt
+- **Fix:** `background.png` wird beim Start gelöscht → immer schwarz bis neues Video geladen
+
+---
+
+## 2026-04-08 v2 – Performance Fix: Hardware-Decoding + RAM-Copy
+
+### Zusammenfassung
+Das Video lief mit reinem Software-Decoding (CPU 209%, Hänger, Artefakte).
+Nach dem Fix nutzt VLC den Hardware-HEVC-Decoder des Pi 5 (CPU ~6%, flüssig, keine Artefakte).
+
+### Änderungen
+
+#### 1. VLC-Argumente: Hardware-Decoding aktiviert (KRITISCH)
+- **Problem:** `--avcodec-hw=drm` aktiviert auf dem Pi 5 NICHT den Hardware-Decoder.
+- **Fix:** VLC_ARGS komplett überarbeitet:
+  - `--codec=drm_avcodec` — Pi 5 HW HEVC/H264 Decoder (stateless V4L2 via rpi-hevc-dec)
+  - `--drm-vout-pool-dmabuf` — Zero-Copy: DMA-Buffer direkt zum Display
+  - `--no-audio` — Kein Audio nötig für Loop-Display
+  - `--file-caching=2000` — 2 Sekunden Read-Ahead Buffer
+  - `--avcodec-hw=drm` entfernt (funktioniert nicht auf Pi 5)
+
+#### 2. Video wird vor Abspielen in RAM kopiert (NEU)
+- **Problem:** Direktes Lesen vom USB-Stick bei ~55 Mbit/s → sporadische I/O-Stalls
+- **Fix:** Neue Funktion `copy_to_ram()` kopiert Video nach `/tmp/loop-player/` (tmpfs)
+  - Prüft freien RAM (512 MB Headroom)
+  - Fallback auf USB bei zu großem Video
+  - RAM-Kopie wird bei USB-Entfernung gelöscht
+  - `import shutil` hinzugefügt
+
+#### 3. config.txt: Doppeltes DRM-Overlay entfernt
+- **Problem:** Setup hängte zweites `dtoverlay=vc4-kms-v3d,cma-512` an
+- **Fix:** `cma-512` wird zum bestehenden Overlay hinzugefügt (kein Duplikat)
+
+### Performance-Vergleich
+
+| Metrik | v1 (Software) | v2 (Hardware) |
+|--------|---------------|---------------|
+| VLC CPU-Last | 209% | ~6-9% |
+| Temperatur | 77.9°C | 67.0°C |
+| VLC RAM | 247 MB | 104 MB |
+| Decoder | libavcodec Software | rpi-hevc-dec Hardware |
+| Video-Quelle | USB-Stick (I/O stalls) | RAM (tmpfs) |
+| Display-Pipeline | CPU Frame Copy | Zero-Copy DMA |
+
+---
+
+## 2026-04-08 v1 – Bugfix: Schwarzer Bildschirm nach Installation
+
+### Symptom
+Nach Installation via `setup_loop_player.sh` blieb der Bildschirm schwarz.
+
+### Gefundene Fehler (6 Stück)
+
+#### 1. USB-Stick ohne Partitionstabelle wird nicht erkannt
+- **Fix:** `find_usb_partition()` prüft jetzt auch das Disk-Device selbst auf Dateisystem
+
+#### 2. VLC verweigert Start als root
+- **Fix:** Service läuft als User (dynamisch via `id -un 1000`), sudoers für mount/umount
+
+#### 3. Falsche VLC DRM-Optionen (VLC 3.0)
+- **Fix:** `--drm-vout-display=HDMI-1` statt nicht-existierender Optionen
+
+#### 4. `UnboundLocalError: vlc_process` in `main()`
+- **Fix:** `global running, vlc_process` in `main()`
+
+#### 5. ffmpeg konnte `background.png` nicht schreiben
+- **Fix:** `-update 1` Flag + `chown` auf User
+
+#### 6. VLC stderr nach /dev/null → keine Fehlermeldungen
+- **Fix:** `stderr=subprocess.PIPE` + Fehlermeldungen werden geloggt

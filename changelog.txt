@@ -1,5 +1,19 @@
 # Changelog – Seamless Loop Player
 
+## 2026-04-08 v4 – Idempotenz & Boot-Dateien Fixes
+
+### Änderungen
+
+#### 1. `cmdline.txt` ohne abschließendes Newline
+- **Problem:** `sed`-Befehle hinterließen die Datei ohne Trailing Newline → manche Tools/Firmware haben Probleme
+- **Fix:** `sed -i -e '$a\' "$CMDLINE_FILE"` nach Bearbeitung
+
+#### 2. Leere Zeilen sammeln sich in `config.txt` an
+- **Problem:** Bei jeder Ausführung wurde der Loop-Player-Block gelöscht und neu angehängt → N Durchläufe = N überflüssige Leerzeilen
+- **Fix:** `sed -i -e :a -e '/^\s*$/{ $d; N; ba; }'` entfernt Trailing-Leerzeilen vor Append
+
+---
+
 ## 2026-04-08 v3 – Universal USB Support + Standby Fix
 
 ### Änderungen

@@ -80,6 +80,8 @@ if [ -f "$CMDLINE_FILE" ]; then
     sed -i 's/ logo.nologo//g' "$CMDLINE_FILE"
     sed -i 's/console=tty1/console=tty3/g' "$CMDLINE_FILE"
     sed -i '1 s/$/ quiet loglevel=0 vt.global_cursor_default=0 logo.nologo consoleblank=0/' "$CMDLINE_FILE"
+    # Ensure trailing newline (some tools break without it)
+    sed -i -e '$a\' "$CMDLINE_FILE"
     info "Kernel parameters configured."
 else
     warn "$CMDLINE_FILE not found, skipping."
@@ -102,6 +104,9 @@ if [ -f "$CONFIG_FILE" ]; then
     elif ! grep -q 'cma-512' "$CONFIG_FILE"; then
         sed -i 's/^dtoverlay=vc4-kms-v3d.*/dtoverlay=vc4-kms-v3d,cma-512/' "$CONFIG_FILE"
     fi
+
+    # Remove trailing blank lines before appending (prevents accumulation on re-runs)
+    sed -i -e :a -e '/^\s*$/{ $d; N; ba; }' "$CONFIG_FILE"
 
     cat >> "$CONFIG_FILE" << 'EOF'
 

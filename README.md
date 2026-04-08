@@ -122,8 +122,13 @@ This reverts all system changes (config.txt, cmdline.txt, services, udev rules, 
 ```
 seamless-loop-player/
 ├── README.md                  # This file
+├── LICENSE                    # Proprietary license
 ├── setup_loop_player.sh       # One-click installer (contains loop_player.py inline)
 ├── uninstall_loop_player.sh   # Uninstaller
 ├── loop_player.py             # Reference copy (installed inline by setup script)
 └── changelog.txt              # Bugfix & performance history
 ```
+
+## License
+
+This software is proprietary. All rights reserved. See [LICENSE](LICENSE) for details.

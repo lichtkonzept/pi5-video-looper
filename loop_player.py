@@ -13,6 +13,7 @@ import json
 import logging
 import shutil
 import time
+import glob
 
 # --- Configuration ---
 MOUNT_POINT = "/mnt/usb"
@@ -21,6 +22,25 @@ INSTALL_DIR = "/opt/loop-player"
 RAM_COPY_DIR = "/tmp/loop-player"
 BACKGROUND_IMG = os.path.join(INSTALL_DIR, "background.png")
 BLACK_IMG = os.path.join(INSTALL_DIR, "black.png")
+def detect_hdmi_port():
+    """Auto-detect which HDMI port has a connected display.
+    Reads /sys/class/drm/card*-HDMI-A-*/status. Returns 'HDMI-1' or 'HDMI-2'.
+    Falls back to 'HDMI-1' if detection fails.
+    """
+    try:
+        for status_file in sorted(glob.glob("/sys/class/drm/card*-HDMI-A-*/status")):
+            with open(status_file) as f:
+                if f.read().strip() == "connected":
+                    # Extract port number: card0-HDMI-A-1 -> 1
+                    port = status_file.split("HDMI-A-")[1].split("/")[0]
+                    return f"HDMI-{port}"
+    except Exception:
+        pass
+    return "HDMI-1"
+
+
+HDMI_PORT = detect_hdmi_port()
+
 VLC_ARGS = [
     "cvlc",
     "--no-xlib",
@@ -30,7 +50,7 @@ VLC_ARGS = [
     "--no-osd",
     "--codec=drm_avcodec",
     "--vout=drm_vout",
-    "--drm-vout-display=HDMI-1",
+    f"--drm-vout-display={HDMI_PORT}",
     "--drm-vout-pool-dmabuf",
     "--no-audio",
     "--file-caching=2000",
@@ -160,7 +180,7 @@ def main():
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
 
-    log.info("=== Loop Player started ===")
+    log.info(f"=== Loop Player started === (HDMI: {HDMI_PORT})")
 
     # Always start with black screen — remove stale background from previous video
     try:

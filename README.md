@@ -40,9 +40,12 @@ scp setup_loop_player.sh youruser@192.168.1.55:~/setup_loop_player.sh
 
 ```bash
 ssh youruser@192.168.1.55
+sed -i 's/\r$//' ~/setup_loop_player.sh
 chmod +x ~/setup_loop_player.sh
-sudo ./setup_loop_player.sh
+sudo ~/setup_loop_player.sh
 ```
+
+> **Note:** The `sed` command removes Windows line endings (CRLF → LF). Without it, the script may fail with "No such file or directory".
 
 5. The Pi will reboot automatically
 6. Insert a FAT32 USB stick with `loop.mp4` – playback starts automatically

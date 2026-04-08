@@ -392,8 +392,13 @@ ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", TAG+="systemd", RUN+="/bi
 ACTION=="remove", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", TAG+="systemd", RUN+="/bin/systemctl restart loop-player.service"
 EOF
 
+# HDMI hotplug: restart service when display is connected/disconnected
+cat > /etc/udev/rules.d/99-loop-player-hdmi.rules << 'EOF'
+ACTION=="change", SUBSYSTEM=="drm", RUN+="/bin/systemctl restart loop-player.service"
+EOF
+
 udevadm control --reload-rules
-info "USB rules configured."
+info "USB + HDMI hotplug rules configured."
 
 # ============================================================================
 # 8. Systemd Service

@@ -33,6 +33,7 @@ pkill -f "cvlc.*drm_vout" 2>/dev/null || true
 # --- Remove udev rules ---
 info "Removing udev rules..."
 rm -f /etc/udev/rules.d/99-loop-player-usb.rules
+rm -f /etc/udev/rules.d/99-loop-player-hdmi.rules
 udevadm control --reload-rules
 
 # --- Remove sudoers rule ---

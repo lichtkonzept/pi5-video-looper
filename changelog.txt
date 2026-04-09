@@ -1,5 +1,37 @@
 # Changelog – Seamless Loop Player
 
+## 2026-04-09 v5 – System Hardening for Digital Signage
+
+### Änderungen
+
+#### 1. Journal-Größenbegrenzung
+- **Problem:** Journal wächst unbegrenzt → füllt SD-Karte über Monate
+- **Fix:** `SystemMaxUse=50M`, `MaxRetentionSec=7day` via journald.conf.d Drop-in
+
+#### 2. Automatische apt-Updates deaktiviert
+- **Problem:** `apt-daily.timer` + `apt-daily-upgrade.timer` können mitten in der Wiedergabe CPU/RAM/Netz beanspruchen und VLC/Python upgraden
+- **Fix:** Timer deaktiviert + Services gemaskiert
+
+#### 3. tmpfiles-clean Ausnahme
+- **Problem:** `systemd-tmpfiles-clean` löscht Dateien in `/tmp` nach 10 Tagen → RAM-Kopie des Videos wird gelöscht
+- **Fix:** `/etc/tmpfiles.d/loop-player.conf` mit `x /tmp/loop-player` Ausnahme
+
+#### 4. Hardware-Watchdog + kernel.panic
+- **Problem:** Bei Kernel-Panic bleibt System hängen (`kernel.panic=0`), kein Auto-Reboot
+- **Fix:** `kernel.panic=10`, `kernel.panic_on_oops=1`, systemd RuntimeWatchdog=15s
+
+#### 5. Unnötige Services deaktiviert
+- bluetooth, ModemManager, avahi-daemon, serial-getty@ttyAMA10
+- wpa_supplicant + NetworkManager + SSH bleiben aktiv (WiFi-Management)
+
+#### 6. Unnötige Timer deaktiviert
+- fstrim, e2scrub_all, man-db, dpkg-db-backup
+
+#### 7. Uninstaller aktualisiert
+- Räumt alle Hardening-Configs auf und re-enabled Services/Timers
+
+---
+
 ## 2026-04-08 v4 – Idempotenz & Boot-Dateien Fixes
 
 ### Änderungen

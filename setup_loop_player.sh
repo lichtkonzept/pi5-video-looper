@@ -88,7 +88,70 @@ else
 fi
 
 # ============================================================================
-# 5. GPU / Display Configuration (config.txt)
+# 5. System Hardening for Digital Signage
+# ============================================================================
+info "Hardening system for unattended operation..."
+
+# --- Limit journal size to prevent SD card fill-up ---
+mkdir -p /etc/systemd/journald.conf.d
+cat > /etc/systemd/journald.conf.d/loop-player.conf << 'EOF'
+[Journal]
+SystemMaxUse=50M
+SystemMaxFileSize=10M
+MaxRetentionSec=7day
+EOF
+systemctl restart systemd-journald 2>/dev/null || true
+info "Journal limited to 50MB."
+
+# --- Disable automatic apt updates (prevent mid-playback interruptions) ---
+systemctl disable --now apt-daily.timer 2>/dev/null || true
+systemctl disable --now apt-daily-upgrade.timer 2>/dev/null || true
+systemctl mask apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+info "Automatic apt updates disabled."
+
+# --- Protect /tmp/loop-player from tmpfiles-clean (runs after 10d) ---
+cat > /etc/tmpfiles.d/loop-player.conf << 'EOF'
+x /tmp/loop-player
+x /tmp/loop-player/*
+EOF
+info "RAM copy protected from tmpfiles-clean."
+
+# --- Hardware watchdog: auto-reboot on kernel panic / hang ---
+cat > /etc/sysctl.d/99-loop-player-watchdog.conf << 'EOF'
+kernel.panic = 10
+kernel.panic_on_oops = 1
+EOF
+sysctl -p /etc/sysctl.d/99-loop-player-watchdog.conf 2>/dev/null || true
+# Enable Pi 5 hardware watchdog via systemd
+if [ ! -f /etc/systemd/system.conf.d/watchdog.conf ]; then
+    mkdir -p /etc/systemd/system.conf.d
+    cat > /etc/systemd/system.conf.d/watchdog.conf << 'EOF'
+[Manager]
+RuntimeWatchdog=15s
+RebootWatchdog=2min
+EOF
+fi
+info "Hardware watchdog enabled (auto-reboot on hang/panic)."
+
+# --- Disable unnecessary services ---
+for svc in bluetooth.service ModemManager.service avahi-daemon.service; do
+    systemctl disable --now "$svc" 2>/dev/null || true
+done
+# Serial getty on debug UART — not needed
+systemctl disable --now serial-getty@ttyAMA10.service 2>/dev/null || true
+# wpa_supplicant + NetworkManager + ssh STAY ENABLED (WiFi management)
+info "Unnecessary services disabled (bluetooth, ModemManager, avahi, serial-getty)."
+
+# --- Disable unnecessary timers ---
+for tmr in fstrim.timer e2scrub_all.timer man-db.timer dpkg-db-backup.timer; do
+    systemctl disable --now "$tmr" 2>/dev/null || true
+done
+info "Unnecessary timers disabled."
+
+info "System hardening complete."
+
+# ============================================================================
+# 6. GPU / Display Configuration (config.txt)
 # ============================================================================
 info "Configuring GPU settings..."
 
@@ -121,7 +184,7 @@ else
 fi
 
 # ============================================================================
-# 6. Application Installation
+# 7. Application Installation
 # ============================================================================
 info "Installing application to ${INSTALL_DIR}..."
 
@@ -388,9 +451,9 @@ chown "$TARGET_USER":"$TARGET_USER" "${MOUNT_POINT}"
 info "Application installed."
 
 # ============================================================================
-# 7. USB udev rules (restart service on USB insert/remove)
+# 8. USB + HDMI udev rules
 # ============================================================================
-info "Configuring USB rules..."
+info "Configuring udev rules..."
 
 cat > /etc/udev/rules.d/99-loop-player-usb.rules << 'EOF'
 ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", TAG+="systemd", RUN+="/bin/systemctl restart loop-player.service"
@@ -406,7 +469,7 @@ udevadm control --reload-rules
 info "USB + HDMI hotplug rules configured."
 
 # ============================================================================
-# 8. Systemd Service
+# 9. Systemd Service
 # ============================================================================
 info "Creating systemd service..."
 
@@ -442,7 +505,7 @@ systemctl enable ${SERVICE_NAME}.service
 info "Systemd service created and enabled."
 
 # ============================================================================
-# 9. Helper Scripts
+# 10. Helper Scripts
 # ============================================================================
 info "Installing helper scripts..."
 
@@ -480,7 +543,7 @@ chmod +x /usr/local/bin/loop-start /usr/local/bin/loop-stop /usr/local/bin/loop-
 info "Helper scripts installed."
 
 # ============================================================================
-# 10. Done
+# 11. Done
 # ============================================================================
 echo ""
 info "============================================"

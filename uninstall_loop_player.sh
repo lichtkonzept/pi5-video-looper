@@ -40,6 +40,28 @@ udevadm control --reload-rules
 info "Removing sudoers rule..."
 rm -f /etc/sudoers.d/loop-player
 
+# --- Remove system hardening configs ---
+info "Removing system hardening configs..."
+rm -f /etc/systemd/journald.conf.d/loop-player.conf
+rm -f /etc/tmpfiles.d/loop-player.conf
+rm -f /etc/sysctl.d/99-loop-player-watchdog.conf
+rm -f /etc/systemd/system.conf.d/watchdog.conf
+# Re-enable services that were disabled
+for svc in bluetooth.service ModemManager.service avahi-daemon.service; do
+    systemctl unmask "$svc" 2>/dev/null || true
+    systemctl enable "$svc" 2>/dev/null || true
+done
+systemctl enable serial-getty@ttyAMA10.service 2>/dev/null || true
+# Re-enable timers
+for tmr in fstrim.timer e2scrub_all.timer man-db.timer dpkg-db-backup.timer; do
+    systemctl enable "$tmr" 2>/dev/null || true
+done
+# Unmask apt services
+systemctl unmask apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+systemctl enable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
+# Reset kernel panic settings
+sysctl -w kernel.panic=0 kernel.panic_on_oops=0 2>/dev/null || true
+
 # --- Remove application ---
 info "Removing application files..."
 rm -rf /opt/loop-player

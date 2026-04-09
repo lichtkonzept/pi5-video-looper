@@ -519,7 +519,6 @@ info "Configuring udev rules..."
 
 cat > /etc/udev/rules.d/99-loop-player-usb.rules << 'EOF'
 ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", TAG+="systemd", RUN+="/bin/systemctl restart loop-player.service"
-ACTION=="remove", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", TAG+="systemd", RUN+="/bin/systemctl restart loop-player.service"
 EOF
 
 # HDMI hotplug: restart service when display is connected/disconnected

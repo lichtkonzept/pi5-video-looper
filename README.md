@@ -36,13 +36,13 @@ One-click setup for a hardened Digital Signage player on Raspberry Pi 5. Insert 
 3. Copy the setup script to the Pi:
 
 ```bash
-scp setup_loop_player.sh youruser@192.168.1.55:~/setup_loop_player.sh
+scp setup_loop_player.sh youruser@<PI-IP>:~/setup_loop_player.sh
 ```
 
 4. Run it:
 
 ```bash
-ssh youruser@192.168.1.55
+ssh youruser@<PI-IP>
 sed -i 's/\r$//' ~/setup_loop_player.sh
 chmod +x ~/setup_loop_player.sh
 sudo ~/setup_loop_player.sh

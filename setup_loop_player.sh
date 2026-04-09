@@ -202,8 +202,11 @@ cat > "${INSTALL_DIR}/loop_player.py" << 'PYTHON_EOF'
 #!/usr/bin/env python3
 """
 Seamless Loop Player for Raspberry Pi 5
-Finds USB stick, copies video to RAM, plays via cvlc in a loop.
-Exits when VLC stops or USB is removed — systemd restarts us.
+Flow: USB → SD → RAM → Playback
+  1. If USB present: copy video from USB to SD, then eject USB
+  2. Copy video from SD to RAM (tmpfs)
+  3. Play from RAM in a loop
+  4. New USB inserted → udev restarts service → video updated on SD
 """
 
 import subprocess
@@ -215,14 +218,20 @@ import logging
 import shutil
 import time
 import glob
+import hashlib
 
 # --- Configuration ---
 MOUNT_POINT = "/mnt/usb"
 VIDEO_FILENAME = "loop.mp4"
 INSTALL_DIR = "/opt/loop-player"
+SD_VIDEO_DIR = os.path.join(INSTALL_DIR, "video")
+SD_VIDEO_PATH = os.path.join(SD_VIDEO_DIR, VIDEO_FILENAME)
 RAM_COPY_DIR = "/tmp/loop-player"
+RAM_VIDEO_PATH = os.path.join(RAM_COPY_DIR, VIDEO_FILENAME)
 BACKGROUND_IMG = os.path.join(INSTALL_DIR, "background.png")
 BLACK_IMG = os.path.join(INSTALL_DIR, "black.png")
+
+
 def detect_hdmi_port():
     """Auto-detect which HDMI port has a connected display.
     Reads /sys/class/drm/card*-HDMI-A-*/status. Returns 'HDMI-1' or 'HDMI-2'.
@@ -232,7 +241,6 @@ def detect_hdmi_port():
         for status_file in sorted(glob.glob("/sys/class/drm/card*-HDMI-A-*/status")):
             with open(status_file) as f:
                 if f.read().strip() == "connected":
-                    # Extract port number: card0-HDMI-A-1 -> 1
                     port = status_file.split("HDMI-A-")[1].split("/")[0]
                     return f"HDMI-{port}"
     except Exception:
@@ -278,10 +286,24 @@ def shutdown(sig, frame):
     sys.exit(0)
 
 
+def file_checksum(path, chunk_size=1024 * 1024):
+    """Fast partial MD5: first+last 1MB. Good enough to detect changed videos."""
+    h = hashlib.md5()
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            h.update(f.read(chunk_size))
+            if size > chunk_size * 2:
+                f.seek(-chunk_size, 2)
+                h.update(f.read(chunk_size))
+        h.update(str(size).encode())
+    except Exception:
+        return None
+    return h.hexdigest()
+
+
 def find_usb_partition():
-    """Find the first mountable partition (or raw disk) on a USB storage device.
-    Supports all common filesystems: FAT32, exFAT, NTFS, ext2/3/4, etc.
-    """
+    """Find the first mountable partition (or raw disk) on a USB storage device."""
     try:
         result = subprocess.run(
             ["lsblk", "-o", "PATH,FSTYPE,TRAN,TYPE", "-J", "-T"],
@@ -293,11 +315,9 @@ def find_usb_partition():
         for dev in data.get("blockdevices", []):
             if dev.get("tran") != "usb" or dev.get("type") != "disk":
                 continue
-            # Prefer partitions over raw disk
             for child in dev.get("children", []):
                 if child.get("fstype"):
                     return child["path"]
-            # Disk without partition table (directly formatted)
             if dev.get("fstype"):
                 return dev["path"]
     except Exception as e:
@@ -328,26 +348,76 @@ def mount_usb(partition):
     return False
 
 
-def copy_to_ram(video_path):
-    os.makedirs(RAM_COPY_DIR, exist_ok=True)
-    dest = os.path.join(RAM_COPY_DIR, VIDEO_FILENAME)
+def unmount_usb():
     try:
-        src_size = os.path.getsize(video_path)
+        subprocess.run(["sudo", "umount", MOUNT_POINT],
+                       capture_output=True, timeout=10)
+        log.info("USB unmounted — stick can be removed")
+    except Exception:
+        pass
+
+
+def import_from_usb():
+    """Check USB for video, copy to SD if new/changed, then eject USB.
+    Returns True if a new video was imported.
+    """
+    partition = find_usb_partition()
+    if not partition:
+        return False
+
+    if not mount_usb(partition):
+        return False
+
+    usb_video = os.path.join(MOUNT_POINT, VIDEO_FILENAME)
+    if not os.path.isfile(usb_video):
+        log.info(f"No {VIDEO_FILENAME} on USB — ignoring stick")
+        unmount_usb()
+        return False
+
+    # Compare checksums — skip copy if identical
+    usb_hash = file_checksum(usb_video)
+    sd_hash = file_checksum(SD_VIDEO_PATH) if os.path.isfile(SD_VIDEO_PATH) else None
+
+    if usb_hash and usb_hash == sd_hash:
+        log.info("Video on USB identical to SD — skipping import")
+        unmount_usb()
+        return False
+
+    # Copy USB → SD
+    os.makedirs(SD_VIDEO_DIR, exist_ok=True)
+    usb_size = os.path.getsize(usb_video)
+    log.info(f"Importing video from USB to SD ({usb_size // (1024*1024)}MB)...")
+    try:
+        shutil.copy2(usb_video, SD_VIDEO_PATH)
+        log.info("Video imported to SD successfully")
+    except Exception as e:
+        log.error(f"USB→SD copy failed: {e}")
+        unmount_usb()
+        return False
+
+    unmount_usb()
+    return True
+
+
+def copy_to_ram():
+    """Copy video from SD to RAM (tmpfs). Returns path or None."""
+    os.makedirs(RAM_COPY_DIR, exist_ok=True)
+    try:
+        src_size = os.path.getsize(SD_VIDEO_PATH)
         stat = os.statvfs("/tmp")
         free = stat.f_bavail * stat.f_frsize
         if src_size > free - 512 * 1024 * 1024:
-            log.warning("Video too large for RAM, playing from USB")
+            log.warning("Video too large for RAM, playing from SD")
             return None
         log.info(f"Copying video to RAM ({src_size // (1024*1024)}MB)...")
-        shutil.copy2(video_path, dest)
-        return dest
+        shutil.copy2(SD_VIDEO_PATH, RAM_VIDEO_PATH)
+        return RAM_VIDEO_PATH
     except Exception as e:
         log.error(f"RAM copy failed: {e}")
         return None
 
 
 def extract_background(video_path):
-    # Remove old background so we never show a stale frame from a previous video
     try:
         os.remove(BACKGROUND_IMG)
     except FileNotFoundError:
@@ -383,42 +453,33 @@ def main():
 
     log.info(f"=== Loop Player started === (HDMI: {HDMI_PORT})")
 
-    # Always start with black screen — remove stale background from previous video
+    # Remove stale background
     try:
         os.remove(BACKGROUND_IMG)
     except FileNotFoundError:
         pass
 
-    # Find USB
-    partition = find_usb_partition()
-    if not partition:
-        log.info("No USB found, showing standby")
+    # Step 1: Import from USB if present (USB → SD), then eject
+    imported = import_from_usb()
+    if imported:
+        # Clear RAM copy so we re-copy the new video
+        shutil.rmtree(RAM_COPY_DIR, ignore_errors=True)
+
+    # Step 2: Check if we have a video on SD
+    if not os.path.isfile(SD_VIDEO_PATH):
+        log.info("No video on SD — showing standby (insert USB with loop.mp4)")
         bg = show_standby()
         if bg:
             bg.wait()
         time.sleep(5)
         return
 
-    # Mount
-    if not mount_usb(partition):
-        time.sleep(5)
-        return
-
-    video_path = os.path.join(MOUNT_POINT, VIDEO_FILENAME)
-    if not os.path.isfile(video_path):
-        log.warning(f"{VIDEO_FILENAME} not found on USB")
-        bg = show_standby()
-        if bg:
-            bg.wait()
-        time.sleep(5)
-        return
-
-    # Copy to RAM + extract background
-    ram_video = copy_to_ram(video_path)
-    playback_path = ram_video or video_path
+    # Step 3: Copy SD → RAM
+    ram_video = copy_to_ram()
+    playback_path = ram_video or SD_VIDEO_PATH
     extract_background(playback_path)
 
-    # Play
+    # Step 4: Play
     cmd = VLC_ARGS + ["--input-repeat=65535", playback_path]
     log.info(f"Playing: {playback_path}")
     vlc_process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -444,6 +505,7 @@ if __name__ == "__main__":
 PYTHON_EOF
 
 chmod +x "${INSTALL_DIR}/loop_player.py"
+mkdir -p "${INSTALL_DIR}/video"
 chown -R "$TARGET_USER":"$TARGET_USER" "${INSTALL_DIR}"
 # Unmount USB first (may be mounted from previous install), then chown
 umount "${MOUNT_POINT}" 2>/dev/null || true

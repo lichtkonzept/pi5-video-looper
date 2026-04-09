@@ -1,5 +1,30 @@
 # Changelog – Seamless Loop Player
 
+## 2026-04-09 v6 – USB→SD→RAM Playback Flow
+
+### Änderungen
+
+#### Neuer Video-Flow
+- **Vorher:** USB → RAM → Playback (USB musste eingesteckt bleiben oder Video ging aus RAM verloren nach Reboot)
+- **Nachher:** USB → SD → RAM → Playback
+  - USB wird nur zum Importieren genutzt, danach automatisch ausgeworfen
+  - Video bleibt persistent auf SD-Karte (`/opt/loop-player/video/loop.mp4`)
+  - RAM-Copy läuft immer von SD, nicht von USB
+  - USB-Stick kann nach Import sofort entfernt werden
+  - Neuer USB-Stick überschreibt Video auf SD (udev restart)
+
+#### Checksum-Vergleich
+- Schneller partieller MD5 (first+last 1MB + Dateigröße)
+- Identisches Video auf USB → Import wird übersprungen, kein unnötiges Schreiben auf SD
+
+#### Neue Dateien/Pfade
+- `/opt/loop-player/video/` — persistenter Video-Speicher auf SD
+- `unmount_usb()` — automatisches Auswerfen nach Import
+- `import_from_usb()` — zentraler Import-Flow mit Checksum
+- `file_checksum()` — schneller Dateivergleich
+
+---
+
 ## 2026-04-09 v5 – System Hardening for Digital Signage
 
 ### Änderungen

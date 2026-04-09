@@ -383,15 +383,43 @@ def import_from_usb():
         unmount_usb()
         return False
 
-    # Copy USB → SD
+    # Copy USB → SD (delete old first to avoid two copies filling the disk)
     os.makedirs(SD_VIDEO_DIR, exist_ok=True)
     usb_size = os.path.getsize(usb_video)
+    MIN_FREE_AFTER_COPY = 2 * 1024 * 1024 * 1024  # 2 GB
+
+    # Remove old video first so we never have two on disk at once
+    old_existed = os.path.isfile(SD_VIDEO_PATH)
+    if old_existed:
+        try:
+            os.remove(SD_VIDEO_PATH)
+            log.info("Old video on SD removed")
+        except Exception as e:
+            log.error(f"Failed to remove old video: {e}")
+            unmount_usb()
+            return False
+
+    # Check free space (after deletion, before copy)
+    stat = os.statvfs(SD_VIDEO_DIR)
+    free = stat.f_bavail * stat.f_frsize
+    if usb_size > free - MIN_FREE_AFTER_COPY:
+        log.error(f"Not enough space on SD: {free//(1024*1024)}MB free, need {usb_size//(1024*1024)}MB + 2GB reserve")
+        unmount_usb()
+        return False
+
     log.info(f"Importing video from USB to SD ({usb_size // (1024*1024)}MB)...")
+    tmp_path = SD_VIDEO_PATH + ".tmp"
     try:
-        shutil.copy2(usb_video, SD_VIDEO_PATH)
+        shutil.copy2(usb_video, tmp_path)
+        os.replace(tmp_path, SD_VIDEO_PATH)
         log.info("Video imported to SD successfully")
     except Exception as e:
         log.error(f"USB→SD copy failed: {e}")
+        # Clean up partial copy
+        try:
+            os.remove(tmp_path)
+        except FileNotFoundError:
+            pass
         unmount_usb()
         return False
 
